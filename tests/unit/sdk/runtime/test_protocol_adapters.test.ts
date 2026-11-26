@@ -760,8 +760,12 @@ it.each(['a2a', 'agui'])(
           [
             '-e',
             `
-      process.on('SIGTERM', () => process.send('cleaning'));
-      process.on('message', () => process.exit(0));
+      // Cooperative shutdown over IPC: process signals are not delivered to
+      // Windows children, so the parent asks for cleanup with a message instead.
+      process.on('message', (message) => {
+        if (message === 'stop') process.send('cleaning');
+        else process.exit(0);
+      });
       process.send('ready'); setInterval(() => {}, 1000);
     `,
           ],
@@ -770,7 +774,7 @@ it.each(['a2a', 'agui'])(
         exited = once(child, 'exit');
         await once(child, 'message');
         const stop = () => {
-          child!.kill('SIGTERM');
+          if (child!.connected) child!.send('stop');
         };
         context.signal.addEventListener('abort', stop, { once: true });
         if (context.signal.aborted) stop();

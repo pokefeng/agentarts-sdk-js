@@ -2,7 +2,7 @@
 
 > 复验发现的四项 A2A 缺陷已修复。详见 [复验报告与修复记录](runtime_protocols_revalidation.md)。
 
-提供两个可选协议包，基础 SDK 不加载协议依赖。完整业务协议入口分别是 `createA2aService()` 和 `createAguiAgent()`；原有 `createA2aAdapter()` / `createAguiAdapter()` 保持文本模式兼容，不能用文本适配器验收完整能力。当前包尚未发布，云端透传未验收。
+提供两个可选协议包，基础 SDK 不加载协议依赖。完整业务协议入口分别是 `createA2aService()` 和 `createAguiAgent()`；原有 `createA2aAdapter()` / `createAguiAdapter()` 保持文本模式兼容，不能用文本适配器验收完整能力。两个协议包纳入与主包相同的 npm 发布流程（顺序与版本约定见 [CONTRIBUTING](../../../CONTRIBUTING.md)），云端透传未验收。
 
 ## 已实现能力
 

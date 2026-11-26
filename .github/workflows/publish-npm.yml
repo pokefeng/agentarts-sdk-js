@@ -1,14 +1,14 @@
-﻿name: Publish to npm
+name: Publish to npm
 
-# 打 tag（v*）时按依赖顺序发布以下四个包到 npm：
-#   - @huaweicloud/huaweicloud-sdk-agentidentity（先发，主包依赖它）
+# 打 tag（v*）时发布以下四个包到 npm（各自独立发布，互不等待）：
+#   - @huaweicloud/huaweicloud-sdk-agentidentity
 #   - @huaweicloud/agentarts-sdk
-#   - @huaweicloud/agentarts-protocol-a2a
-#   - @huaweicloud/agentarts-protocol-agui
+#   - @huaweicloud/agentarts-protocol-a2a（可选协议适配器）
+#   - @huaweicloud/agentarts-protocol-agui（可选协议适配器）
 #
 # 版本约定：
 #   tag 形如 v0.0.1，且必须与 packages/agentarts-sdk 的 version 一致；
-#   agentidentity 按其自身 package.json 的 version 发布（若与 tag 不同会给出告警）。
+#   其余三个包按各自 package.json 的 version 发布（与 tag 不同会给出告警）。
 #   目标版本已存在时自动跳过，便于重复打 tag 或只升其中一个包。
 #
 # 仓库配置：
@@ -62,7 +62,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.sha }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -93,79 +92,19 @@ jobs:
 
       - name: Resolve versions and validate tag
         id: meta
-        shell: bash
+        # 四个包的版本解析与 tag 校验集中在 scripts/publish-meta.mjs，
+        # 本地可用 `node scripts/publish-meta.mjs` 校验，并有单元测试覆盖。
         env:
           INPUT_TAG: ${{ inputs.tag }}
           INPUT_DRY_RUN: ${{ inputs.dry_run }}
-        run: |
-          set -euo pipefail
-
-          SDK_VERSION="$(node -p "require('./packages/agentarts-sdk/package.json').version")"
-          IDENTITY_VERSION="$(node -p "require('./packages/huaweicloud-sdk-agentidentity/package.json').version")"
-          A2A_VERSION="$(node -p "require('./packages/agentarts-protocol-a2a/package.json').version")"
-          AGUI_VERSION="$(node -p "require('./packages/agentarts-protocol-agui/package.json').version")"
-
-          if [[ -z "${SDK_VERSION}" || -z "${IDENTITY_VERSION}" || -z "${A2A_VERSION}" || -z "${AGUI_VERSION}" ]]; then
-            echo "::error::Cannot read package versions"
-            exit 1
-          fi
-
-          TAG=""
-          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
-            TAG="${GITHUB_REF_NAME}"
-          elif [[ -n "${INPUT_TAG:-}" ]]; then
-            TAG="${INPUT_TAG}"
-          fi
-
-          if [[ -n "${TAG}" ]]; then
-            if [[ ! "${TAG}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
-              echo "::error::Invalid tag '${TAG}'. Expected 'v<major>.<minor>.<patch>' (e.g. v${SDK_VERSION})."
-              exit 1
-            fi
-            TAG_VERSION="${TAG#v}"
-            if [[ "${TAG_VERSION}" != "${SDK_VERSION}" ]]; then
-              echo "::error::Tag version '${TAG_VERSION}' does not match @huaweicloud/agentarts-sdk version '${SDK_VERSION}'. Bump the package version or use the correct tag."
-              exit 1
-            fi
-            if [[ "${IDENTITY_VERSION}" != "${TAG_VERSION}" ]]; then
-              echo "::warning::@huaweicloud/huaweicloud-sdk-agentidentity is at ${IDENTITY_VERSION}, which differs from tag ${TAG}. It will be published at ${IDENTITY_VERSION} (skipped if already on the registry)."
-            fi
-          else
-            echo "::notice::No tag supplied (workflow_dispatch); using package versions: agentarts-sdk=${SDK_VERSION}, agentidentity=${IDENTITY_VERSION}"
-          fi
-
-          DRY_RUN="${INPUT_DRY_RUN:-false}"
-          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
-            DRY_RUN="false"
-          fi
-          if [[ "${DRY_RUN}" != "true" && "${DRY_RUN}" != "false" ]]; then
-            DRY_RUN="false"
-          fi
-
-          # Dry runs can validate prototype tarballs. Real releases must version
-          # the coordinated changeset so peers cannot resolve to the old SDK.
-          if [[ "${DRY_RUN}" != "true" ]]; then
-            node scripts/check-protocol-release.mjs
-          fi
-
-          {
-            echo "sdk_version=${SDK_VERSION}"
-            echo "identity_version=${IDENTITY_VERSION}"
-            echo "a2a_version=${A2A_VERSION}"
-            echo "agui_version=${AGUI_VERSION}"
-            echo "dry_run=${DRY_RUN}"
-            echo "tag=${TAG}"
-          } >> "${GITHUB_OUTPUT}"
-
-          echo "Resolved: agentarts-sdk=${SDK_VERSION}, agentidentity=${IDENTITY_VERSION}, tag='${TAG}', dry_run=${DRY_RUN}"
+        run: node scripts/publish-meta.mjs
 
       - name: Copy README/LICENSE into packages
         # npm 只从包目录收集 README/LICENSE；复制后才会进入 tarball。
+        # 两个协议包自带 README/LICENSE，不覆盖。
         run: |
           cp README.md LICENSE packages/agentarts-sdk/
           cp README.md LICENSE packages/huaweicloud-sdk-agentidentity/
-          cp LICENSE packages/agentarts-protocol-a2a/
-          cp LICENSE packages/agentarts-protocol-agui/
 
       - name: Validate npm tarballs
         shell: bash
@@ -178,8 +117,8 @@ jobs:
           pack_and_check() {
             local name="$1"
             local required_file="$2"
-            local tarball
-            local contents
+            local tarball slug file_list package_json expected
+
             tarball="$(pnpm --filter "${name}" pack --pack-destination "${PACK_DIR}" | tail -n 1)"
 
             if [[ ! -f "${tarball}" ]]; then
@@ -188,28 +127,32 @@ jobs:
             fi
 
             echo "Packed ${name} -> ${tarball}"
-            contents="${tarball}.files"
-            # Read the archive completely before grep -q: with pipefail a large
-            # tar listing can otherwise fail when grep closes its pipe early.
-            tar -tzf "${tarball}" > "${contents}"
-            if ! grep -qx "package/dist/index.js" "${contents}"; then
-              echo "::error::${name} tarball is missing dist/index.js"
-              exit 1
-            fi
-            if ! grep -qx "package/README.md" "${contents}"; then
-              echo "::error::${name} tarball is missing README.md"
-              exit 1
-            fi
-            if ! grep -qx "package/LICENSE" "${contents}"; then
-              echo "::error::${name} tarball is missing LICENSE"
-              exit 1
-            fi
-            if [[ -n "${required_file}" ]] && ! grep -qx "${required_file}" "${contents}"; then
+
+            # 先把文件列表和 package.json 完整写入文件再匹配：`grep -q` 命中后会提前
+            # 关闭管道，让 tar 收到 SIGPIPE（`tar: stdout: write error`），在
+            # `set -o pipefail` 下整条管道返回非零，会被误判成"tarball 缺少文件"。
+            # 所以这里不写 `tar -tzf ... | grep -qx ...`。
+            slug="$(printf '%s' "${name}" | tr '/@' '__')"
+            file_list="${PACK_DIR}/${slug}.files.txt"
+            package_json="${PACK_DIR}/${slug}.package.json"
+            tar -tzf "${tarball}" > "${file_list}"
+            tar -xOf "${tarball}" package/package.json > "${package_json}"
+
+            for expected in "package/dist/index.js" "package/README.md" "package/LICENSE"; do
+              if ! grep -qx "${expected}" "${file_list}"; then
+                echo "::error::${name} tarball is missing ${expected}"
+                echo "--- ${file_list} ---"
+                head -n 40 "${file_list}"
+                exit 1
+              fi
+            done
+            if [[ -n "${required_file}" ]] && ! grep -qx "${required_file}" "${file_list}"; then
               echo "::error::${name} tarball is missing ${required_file}"
+              echo "--- ${file_list} ---"
+              head -n 40 "${file_list}"
               exit 1
             fi
-            tar -xOf "${tarball}" package/package.json > "${tarball}.package.json"
-            if grep -q '"workspace:' "${tarball}.package.json"; then
+            if grep -q '"workspace:' "${package_json}"; then
               echo "::error::${name} tarball still contains 'workspace:' dependencies (pnpm should rewrite them)"
               exit 1
             fi
@@ -217,8 +160,8 @@ jobs:
 
           pack_and_check "@huaweicloud/huaweicloud-sdk-agentidentity" ""
           pack_and_check "@huaweicloud/agentarts-sdk" "package/dist/assets/toolkit/plugins/memory/resources/scripts/_shared.mjs"
-          pack_and_check "@huaweicloud/agentarts-protocol-a2a" "package/dist/index.d.ts"
-          pack_and_check "@huaweicloud/agentarts-protocol-agui" "package/dist/index.d.ts"
+          pack_and_check "@huaweicloud/agentarts-protocol-a2a" ""
+          pack_and_check "@huaweicloud/agentarts-protocol-agui" ""
 
       - name: Write summary
         shell: bash
@@ -251,7 +194,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.sha }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -278,8 +220,6 @@ jobs:
         run: |
           cp README.md LICENSE packages/agentarts-sdk/
           cp README.md LICENSE packages/huaweicloud-sdk-agentidentity/
-          cp LICENSE packages/agentarts-protocol-a2a/
-          cp LICENSE packages/agentarts-protocol-agui/
 
       - name: Publish to npm
         shell: bash
@@ -292,8 +232,6 @@ jobs:
           AGUI_VERSION: ${{ needs.verify.outputs.agui_version }}
         run: |
           set -euo pipefail
-
-          node scripts/check-protocol-release.mjs
 
           if [[ -z "${NODE_AUTH_TOKEN:-}" ]]; then
             echo "::error::NPM_TOKEN secret is not configured. Add an npm Automation token in repository secrets."
@@ -331,7 +269,8 @@ jobs:
             echo "${name}|${version}|published" >> "${RESULTS}"
           }
 
-          # 先发布被依赖的包，再发布主包。
+          # 四个包各自独立发布：不判断包之间的先后依赖，也不等待其他包先出现在 registry 上。
+          # 已存在的版本照旧跳过，便于重复打 tag 或只升其中一个包。
           publish_package "@huaweicloud/huaweicloud-sdk-agentidentity" "${IDENTITY_VERSION}"
           publish_package "@huaweicloud/agentarts-sdk" "${SDK_VERSION}"
           publish_package "@huaweicloud/agentarts-protocol-a2a" "${A2A_VERSION}"

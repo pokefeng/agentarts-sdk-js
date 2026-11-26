@@ -1,6 +1,6 @@
 {
   "name": "@huaweicloud/agentarts-protocol-a2a",
-  "version": "0.0.1",
+  "version": "0.0.7",
   "type": "module",
   "description": "Optional AgentArts A2A runtime adapter",
   "main": "./dist/index.js",
@@ -13,7 +13,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "license": "Apache-2.0",
   "engines": {

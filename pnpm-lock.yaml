@@ -171,7 +171,7 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-packageExtensionsChecksum: sha256-Xypi8s/pQtdeq3ZekZezRCiAXPas1S9KZej7AycUa8k=
+packageExtensionsChecksum: sha256-41lPVi2AzCX+iZcl1s0fef8yOBkwjunlFYn+FVHJOCM=
 
 importers:
 
@@ -225,18 +225,6 @@ importers:
       yaml:
         specifier: ^2.9.1
         version: 2.9.1
-
-  examples/protocol_agent:
-    dependencies:
-      '@huaweicloud/agentarts-protocol-a2a':
-        specifier: workspace:*
-        version: link:../../packages/agentarts-protocol-a2a
-      '@huaweicloud/agentarts-protocol-agui':
-        specifier: workspace:*
-        version: link:../../packages/agentarts-protocol-agui
-      '@huaweicloud/agentarts-sdk':
-        specifier: workspace:*
-        version: link:../../packages/agentarts-sdk
 
   packages/agentarts-protocol-a2a:
     dependencies:
@@ -2142,7 +2130,7 @@ snapshots:
       moment: 2.31.0
       moment-timezone: 0.5.48
       ramda: 0.27.2
-      uuid: 11.1.1
+      uuid: 14.0.3
     transitivePeerDependencies:
       - debug
       - supports-color

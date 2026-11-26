@@ -1,6 +1,6 @@
 {
   "name": "@huaweicloud/agentarts-sdk",
-  "version": "0.0.1",
+  "version": "0.0.7",
   "description": "Huawei Cloud AgentArts SDK - Build, deploy and manage AI agents with cloud capabilities",
   "type": "module",
   "main": "./dist/index.js",
